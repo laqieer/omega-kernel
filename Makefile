@@ -2,9 +2,8 @@
 .SUFFIXES:
 #---------------------------------------------------------------------------------
 
-ifeq ($(strip $(DEVKITARM)),)
-$(error "Please set DEVKITARM in your environment. export DEVKITARM=<path to>devkitARM")
-endif
+DEVKITPRO	:= /e/devkitPro
+DEVKITARM	:= $(DEVKITPRO)/devkitARM
 
 include $(DEVKITARM)/gba_rules
 
@@ -55,7 +54,7 @@ LIBS	:= -lgba
 # list of directories containing libraries, this must be the top level containing
 # include and lib
 #---------------------------------------------------------------------------------
-LIBDIRS	:=	$(LIBGBA)
+LIBDIRS	:=	$(DEVKITPRO)/libgba
 
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional

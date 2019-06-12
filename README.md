@@ -1,11 +1,8 @@
-#EZ-FLASH OMEGA Kernel
-
-### How to build 
-
-    1.We use devkitARM_r47, you can use the current version or newer.
-    2.Set the following environment variables in system, or modify the value in build.bat, based on your installation path
- 
-        PATH,DEVKITARM,DEVKITPRO,LIBGBA
-
-    3.Double click on build.bat under winodws. If it goes well, you will get ezkernel.gba
-    4.Rename the ezkernel.gba to ezkernel.bin, that is the omega kernel upgrade file
+# EZ-FLASH OMEGA Kernel
+## Build
+1. Install [devkitPro](https://devkitpro.org/).
+2. Set variable ```DEVKITPRO``` in Makefile.
+3. ```make```
+## Install
+1. Copy ```omega-kernel.gba``` to the root directory of the Micro SD Card and rename it to ```ezkernel.bin```.
+1. Hold on R button and start Gameboy Advance to replace the kernel.
