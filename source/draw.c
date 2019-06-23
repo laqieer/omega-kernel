@@ -221,6 +221,22 @@ void DEBUG_printf(const char *format, ...)
     }
 }
 //---------------------------------------------------------------------------------
+void DEBUG_printf_refresh(const char *format, ...)
+{
+    char* str;
+    va_list va;
+
+    va_start(va, format);
+    vasprintf(&str, format, va);
+    va_end(va);
+	
+	Clear(0, 0, 240, 160, 0x0000, 1);
+
+    DrawHZText12(str,0,0,current_y, RGB(31,31,31),1);
+    
+    free(str);
+}
+//---------------------------------------------------------------------------------
 void ShowbootProgress(char *str)
 {
 	u8 str_len = strlen(str); 	

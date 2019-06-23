@@ -41,7 +41,7 @@
 #include "goomba.h"
 #include "pocketnes.h"
 
-
+#include "elf.h"
 
 FM_FILE_FS pFilename_buffer[MAX_files]EWRAM_BSS;
 FM_NOR_FS pNorFS[MAX_NOR]EWRAM_BSS;
@@ -74,6 +74,9 @@ u16 gl_ingame_RTC_open_status;
 
 
 u8 __attribute__((aligned(4)))GAMECODE[4];
+
+Elf32_Ehdr elf_h;
+Elf32_Shdr sec_h;
 
 FATFS EZcardFs;
 FILINFO fileinfo;
@@ -1208,6 +1211,75 @@ u32 IWRAM_CODE Loadfile2PSRAM(TCHAR *filename)
 	
 }
 //---------------------------------------------------------------------------------
+u32 IWRAM_CODE LoadFilePart2PSRAM(FIL* fp, Elf32_Off off_src,  Elf32_Off off_dst, Elf32_Word size)
+{
+	UINT  ret;
+	u32 res;
+	u32 blocknum;
+	char msg[20];
+	
+	u32 Address;
+	vu16 page=0;
+	SetPSRampage(page);
+	
+	Clear(60,160-15,120,15,gl_color_cheat_black,1);	
+	DrawHZText12(gl_writing,0,78,160-15,gl_color_text,1);	
+
+	f_lseek(fp, off_src);
+	if(size % 0x20000)
+	{
+		if(size > 0x20000)
+		{
+			LoadFilePart2PSRAM(fp, off_src, off_dst, size - size % 0x20000);
+			// size % 0x20000
+			off_src += size - size % 0x20000;
+			off_dst += size - size % 0x20000;
+			size %= 0x20000;
+		}
+		int page_first = off_dst / 0x800000;
+		int page_last = (off_dst + size - 1) / 0x800000;
+		if(page_first != page_last)
+		{// page_last == page_first + 1
+			LoadFilePart2PSRAM(fp, off_src, off_dst, 0x800000 * page_last - off_dst);
+			off_src += 0x800000 * page_last - off_dst;
+			LoadFilePart2PSRAM(fp, off_src, 0x800000 * page_last, off_dst + size - 0x800000 * page_last);
+		}
+		else
+		{
+			SetPSRampage(page_last * 0x1000);
+			off_dst -= 0x800000 * page_last;
+			f_read(fp, pReadCache, size, &ret);
+			dmaCopy((void*)pReadCache,PSRAMBase_S98+off_dst, size);
+		}
+	}
+	else
+		for(blocknum=0x0000;blocknum<size;blocknum+=0x20000)
+		{		
+			sprintf(msg,"%luMb",(blocknum)/0x20000);
+			Clear(78+54,160-15,110,15,gl_color_cheat_black,1);
+			DrawHZText12(msg,0,78+54,160-15,gl_color_text,1);
+			f_read(fp, pReadCache, 0x20000, &ret);//pReadCache max 0x20000 Byte
+				
+			if((gl_reset_on==1) || (gl_rts_on==1) || (gl_sleep_on==1) || (gl_cheat_on==1))		    
+			{
+				PatchInternal((u32*)pReadCache,0x20000,blocknum);
+			}
+							
+			Address=blocknum+off_dst;
+			while(Address>=0x800000)
+			{
+				Address-=0x800000;
+				page+=0x1000;
+			}
+
+			SetPSRampage(page);
+			dmaCopy((void*)pReadCache,PSRAMBase_S98+Address, 0x20000);
+			page = 0;
+		}
+	SetPSRampage(0);
+	return 0;
+}
+//---------------------------------------------------------------------------------
 void CheckLanguage(void)
 {
 	//read setting
@@ -1385,6 +1457,41 @@ u32 IWRAM_CODE LoadEMU2PSRAM(TCHAR *filename,u32 is_EMU)
 	
 	return 0;
 }
+//---------------------------------------------------------------
+u32 IWRAM_CODE LoadELF2PSRAM(TCHAR *filename)
+{
+	u32 res = f_open(&gfile, filename, FA_READ);
+	if(res == FR_OK)
+	{
+		u32 ret;
+		res = f_read(&gfile, &elf_h, sizeof(Elf32_Ehdr), (UINT *)&ret);
+		if(res == FR_OK)
+		{
+			//DEBUG_printf("ELF Information: %d Sections\n", elf_h.e_shnum);
+			//DEBUG_printf("Section Table (ID: Offset-Address-Size):\n");
+			for(int i = 1; i < elf_h.e_shnum; i++)
+			{
+				res = f_lseek(&gfile, elf_h.e_shoff + i * elf_h.e_shentsize);
+				if(res == FR_OK)
+				{
+					res = f_read(&gfile, &sec_h, sizeof(Elf32_Shdr), (UINT *)&ret);
+					if(res == FR_OK)
+					{
+						//DEBUG_printf("%d: 0x%X-0x%X-%d\n", i, sec_h.sh_offset, sec_h.sh_addr, sec_h.sh_size);
+//						Clear(0, 0, 240, 160, gl_color_cheat_black, 1);
+						if(sec_h.sh_size > 0 && sec_h.sh_addr >= 0x8000000 && sec_h.sh_addr + sec_h.sh_size <= 0xA000000)
+						{
+							DEBUG_printf_refresh("Loading section %d: 0x%X, %d B", i, sec_h.sh_addr, sec_h.sh_size);
+							LoadFilePart2PSRAM(&gfile, sec_h.sh_offset, sec_h.sh_addr - 0x8000000, sec_h.sh_size);
+						}
+					}
+				}
+			}
+		}
+		f_close(&gfile);
+	}
+	return res;
+}
 //---------------------------------------------------------------------------------
 extern u16 SET_info_buffer [0x200]EWRAM_BSS;
 void save_set_info_SELECT(void)
@@ -1523,6 +1630,18 @@ u32 Check_file_type(TCHAR *pfilename)
 	}
 	else 
 	{
+		u32 res = f_open(&gfile, pfilename, FA_READ);
+		if(res == FR_OK)
+		{
+			u32 ret;
+			res = f_read(&gfile, &elf_h, sizeof(Elf32_Ehdr), (UINT *)&ret);
+			f_close(&gfile);
+			if(res == FR_OK && sizeof(Elf32_Ehdr) == ret)
+			{
+				if(0x464C457F == *(u32 *)(&elf_h.e_ident[0]))
+					return 4;
+			}
+		}
 		return 0xff;
 	}	
 }
@@ -2268,7 +2387,14 @@ re_showfile:
 				(savfilename)[strlen8-1] = 's';
 				(savfilename)[strlen8-0] = 'v';		
 				(savfilename)[strlen8+1] = 0;	
-			}		
+			}
+			else if(is_EMU == 4){//elf
+				(savfilename)[strlen8-0] = '.';
+				(savfilename)[strlen8+1] = 's';
+				(savfilename)[strlen8+2] = 'a';
+				(savfilename)[strlen8+3] = 'v';
+				(savfilename)[strlen8+4] = 0;
+			}
 			else{
 				(savfilename)[strlen8-3] = 'e';
 				(savfilename)[strlen8-2] = 's';
@@ -2409,7 +2535,22 @@ re_showfile:
 		  FAT_table_buffer[0x1F4/4] = 0x2;  	//copy mode
 			Send_FATbuffer(FAT_table_buffer,1); //only save FAT
 								
-  		res=LoadEMU2PSRAM(pfilename,is_EMU);
+  		if(4 == is_EMU)
+		{
+			res = LoadELF2PSRAM(pfilename);
+			GBApatch_Cleanrom(PSRAMBase_S98,gamefilesize);
+			// Dump 1st part of PSRAM
+			/*res = f_open(&gfile, "/PSRAM_p0.dmp", FA_WRITE | FA_CREATE_ALWAYS);
+			if(res == FR_OK)
+			{
+				u32 written;
+				dmaCopy(PSRAMBase_S98, (void*)pReadCache, 0x20000);
+				res = f_write(&gfile, (void*)pReadCache, 0x20000, &written);
+				f_close(&gfile);
+			}*/
+		}
+		else
+			res = LoadEMU2PSRAM(pfilename,is_EMU);
   		SetRompageWithHardReset(0x200,key_L);
   		while(1);
 		}
