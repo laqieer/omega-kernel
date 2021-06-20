@@ -1,4 +1,7 @@
 # EZ-FLASH OMEGA Kernel
+## Feature
+- [Support ELF](https://youtu.be/FVAixGAGMG4)
+- Debug print (in L+R+Start Menu)
 ## Build
 1. Install [devkitPro](https://devkitpro.org/).
 2. Set variable ```DEVKITPRO``` in Makefile.
